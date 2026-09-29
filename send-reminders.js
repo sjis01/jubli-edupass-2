@@ -18,7 +18,7 @@ const EMAILJS_PUBLIC_KEY = "E2WxVKJkkhBIuNT6H";
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY; // from GitHub secret
 
 // TODO: set this to your real site link
-const APP_URL = "https://YOUR-USERNAME.github.io/YOUR-REPO/";
+const APP_URL = "https://sjis01.github.io/jubli-edupass-2/";
 
 // TODO: adjust if your school is not in this timezone
 const TIMEZONE_OFFSET_HOURS = 8; // Malaysia is UTC+8
