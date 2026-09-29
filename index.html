@@ -123,7 +123,7 @@
                     <!-- COMMON PHONE & DATE FIELDS -->
                     <div>
                         <label class="text-xs font-bold text-gray-500">WHATSAPP NUMBER (FOR VISITOR PASS DELIVERY)</label>
-                        <input type="tel" id="v-phone" placeholder="60123456789" class="w-full p-2.5 border rounded-lg outline-none">
+                        <input type="tel" id="v-phone" placeholder="0123456789" class="w-full p-2.5 border rounded-lg outline-none">
                     </div>
 
                     <div>
@@ -466,6 +466,16 @@ let isProcessingScan = false;// Prevents double-scanning
             });
         };
 
+        function toWhatsAppNumber(phone) {
+    let digits = phone.replace(/[^0-9]/g, ''); // strip spaces, dashes, +
+    if (digits.startsWith('0')) {
+        digits = '6' + digits; // 01114238251 -> 601114238251
+    } else if (!digits.startsWith('60')) {
+        digits = '60' + digits; // in case someone types without the 0 or 6 at all
+    }
+    return digits;
+}
+
         // STAFF REQUEST & EXPRESS PASS GENERATION
         window.requestPass = async function() {
             const passType = document.getElementById('v-type').value;
@@ -505,7 +515,7 @@ let isProcessingScan = false;// Prevents double-scanning
                 if (isExpress) {
                     const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${visitId}`;
                     const waMsg = `Hello ${name}! ⚡ Your *Express Parent Pickup Pass* is READY.\n\n🎟️ Pass ID: ${visitId}\n👧 Student: ${studentName} (${studentClass})\n📅 Date: ${visitDate}\n⏰ Hours: ${startTime} - ${endTime}\n\n📱 *Please show the QR code to the security during entry and exit* View QR Code:\n${qrLink}`;
-                    window.open(`https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(waMsg)}`, '_blank');
+                    window.open(`https://wa.me/${toWhatsAppNumber(phone)}?text=${encodeURIComponent(waMsg)}`, '_blank');
                     
                     if (hostEmail && hostEmail !== 'N/A') {
                         sendHostEmailNotification(docRef.id, host, hostEmail, name, visitDate, startTime, endTime, "Pass Approved & Created");
@@ -565,8 +575,7 @@ let isProcessingScan = false;// Prevents double-scanning
 
                 const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${visitId}`;
                 let waMsg = `Hello ${name}! 👋 Your school pass has been CREATED by Admin.\n\n🎟️ Pass ID: ${visitId}\n📅 Date: ${visitDate}\n⏰ Hours: ${startTime} - ${endTime}\n\n📱 Please show the QR code to the security during entry and exit View QR Code:\n${qrLink}`;
-                window.open(`https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(waMsg)}`, '_blank');
-
+                window.open(`https://wa.me/${toWhatsAppNumber(phone)}?text=${encodeURIComponent(waMsg)}`, '_blank');
                 if (hostEmail && hostEmail !== 'N/A') {
                     sendHostEmailNotification(docRef.id, host, hostEmail, name, visitDate, startTime, endTime, "Pass Approved & Created");
                 }
@@ -582,8 +591,7 @@ let isProcessingScan = false;// Prevents double-scanning
                 const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${visitId}`;
 
                 let textMessage = `Hello ${name}! 👋\n\nYour school pass [${passType}] has been APPROVED.\n\n🎟️ *Pass ID:* ${visitId}\n📅 *Date:* ${visitDate}\n⏰ *Hours:* ${startTime} - ${endTime}\n\n📱 *Please show the QR code to the security during entry and exit* *View QR Code:*\n${qrLink}`;
-                window.open(`https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(textMessage)}`, '_blank');
-
+               window.open(`https://wa.me/${toWhatsAppNumber(phone)}?text=${encodeURIComponent(waMsg)}`, '_blank');
                 if (hostEmail && hostEmail !== 'N/A') {
                     sendHostEmailNotification(docId, host, hostEmail, name, visitDate, startTime, endTime, "Pass Approved");
                 }
