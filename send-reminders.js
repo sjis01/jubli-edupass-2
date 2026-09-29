@@ -14,7 +14,7 @@ const db = admin.firestore();
 const EMAILJS_SERVICE_ID = "service_z2z2kip";
 const EMAILJS_TEMPLATE_ID = "template_n3c1hmb";
 const EMAILJS_OVERDUE_TEMPLATE_ID = "template_xir5ivc";
-const EMAILJS_PUBLIC_KEY = "E2WxVKJkkhBIuNT6H";
+const EMAILJS_PUBLIC_KEY = "ldkkKWxl8pILEcYeC";
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY; // from GitHub secret
 
 // TODO: set this to your real site link
