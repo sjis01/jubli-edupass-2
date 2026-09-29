@@ -18,7 +18,7 @@ const EMAILJS_PUBLIC_KEY = "E2WxVKJkkhBIuNT6H";
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY; // from GitHub secret
 
 // TODO: set this to your real site link
-const APP_URL = "https://sjis01.github.io/jubli-edupass-2/";
+const APP_URL = "https://YOUR-USERNAME.github.io/YOUR-REPO/";
 
 // TODO: adjust if your school is not in this timezone
 const TIMEZONE_OFFSET_HOURS = 8; // Malaysia is UTC+8
@@ -64,9 +64,23 @@ function localNow() {
 }
 
 async function main() {
-  const now = localNow();
-  const todayStr = now.toISOString().split("T")[0];
-  const currentTimeVal = now.getUTCHours() * 60 + now.getUTCMinutes();
+  // ---- Testing override ----
+  // Leave TEST_DATE / TEST_TIME unset for real, scheduled runs.
+  // Set them (via the manual "Run workflow" button) to simulate any date/time,
+  // e.g. TEST_DATE=2026-10-05 TEST_TIME=09:50 to test a pass booked for a future day
+  // without waiting for it to actually arrive.
+  let todayStr, currentTimeVal;
+
+  if (process.env.TEST_DATE && process.env.TEST_TIME) {
+    todayStr = process.env.TEST_DATE;
+    const [h, m] = process.env.TEST_TIME.split(":").map(Number);
+    currentTimeVal = h * 60 + m;
+    console.log(`⚠️ TEST MODE: simulating ${todayStr} ${process.env.TEST_TIME}`);
+  } else {
+    const now = localNow();
+    todayStr = now.toISOString().split("T")[0];
+    currentTimeVal = now.getUTCHours() * 60 + now.getUTCMinutes();
+  }
 
   const snap = await db.collection("visits")
     .where("status", "==", "Pending")
