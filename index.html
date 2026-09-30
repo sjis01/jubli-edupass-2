@@ -126,6 +126,22 @@
                         <input type="tel" id="v-phone" placeholder="0123456789" class="w-full p-2.5 border rounded-lg outline-none">
                     </div>
 
+                    <!-- REASON FOR VISIT (Standard Parent Pass & General Visitor only, not Express) -->
+                    <div id="reason-field" class="hidden">
+                        <label class="text-xs font-bold text-gray-500">REASON FOR VISIT</label>
+                        <select id="v-reason" onchange="toggleReasonOther()" class="w-full p-2.5 border rounded-lg outline-none bg-white">
+                            <option value="Pick up child early">Pick up child early</option>
+                            <option value="Meeting with teacher/staff">Meeting with teacher/staff</option>
+                            <option value="Deliver items to child">Deliver items to child</option>
+                            <option value="Attend school event">Attend school event</option>
+                            <option value="Contractor / Maintenance work">Contractor / Maintenance work</option>
+                            <option value="Delivery / Supplier">Delivery / Supplier</option>
+                            <option value="Interview / Enrollment inquiry">Interview / Enrollment inquiry</option>
+                            <option value="Other">Other (please specify)</option>
+                        </select>
+                        <input type="text" id="v-reason-other" placeholder="Please specify reason" class="w-full p-2.5 border rounded-lg outline-none mt-2 hidden">
+                    </div>
+
                     <div>
                         <label class="text-xs font-bold text-gray-500">DATE OF VISIT</label>
                         <input type="date" id="v-date" class="w-full p-2.5 border rounded-lg outline-none bg-white">
@@ -407,6 +423,8 @@ let isProcessingScan = false;// Prevents double-scanning
                 document.getElementById('parent-fields').classList.add('hidden');
                 document.getElementById('visitor-fields').classList.remove('hidden');
             }
+            // Reason for visit applies to Standard Parent Pass & General Visitor only, not Express
+            document.getElementById('reason-field').classList.toggle('hidden', passType === 'Express Parent Pass');
         };
 
         window.openSecurityDirectly = function() {
@@ -466,6 +484,24 @@ let isProcessingScan = false;// Prevents double-scanning
             });
         };
 
+        // REASON FOR VISIT — English to Malay translation lookup
+        const REASON_TRANSLATIONS = {
+            "Pick up child early": "Mengambil anak lebih awal",
+            "Meeting with teacher/staff": "Mesyuarat dengan guru/kakitangan",
+            "Deliver items to child": "Menghantar barang untuk anak",
+            "Attend school event": "Menghadiri acara sekolah",
+            "Contractor / Maintenance work": "Kerja kontraktor / penyelenggaraan",
+            "Delivery / Supplier": "Penghantaran / pembekal",
+            "Interview / Enrollment inquiry": "Temu duga / pertanyaan pendaftaran"
+        };
+        function getReasonMalay(reasonText) {
+            return REASON_TRANSLATIONS[reasonText] || "(Sebab khas - tiada terjemahan)";
+        }
+        window.toggleReasonOther = function() {
+            const sel = document.getElementById('v-reason').value;
+            document.getElementById('v-reason-other').classList.toggle('hidden', sel !== 'Other');
+        };
+
         function toWhatsAppNumber(phone) {
     let digits = phone.replace(/[^0-9]/g, ''); // strip spaces, dashes, +
     if (digits.startsWith('0')) {
@@ -498,8 +534,19 @@ let isProcessingScan = false;// Prevents double-scanning
                 if (!name || !host || !phone || !visitDate) return alert("Fill in Visitor Name, Host, Phone, and Date.");
             }
 
-            const visitId = 'VISIT-' + Math.random().toString(36).substr(2, 7).toUpperCase();
             const isExpress = passType.includes('Express');
+
+            // REASON FOR VISIT (required for Standard Parent Pass & General Visitor, not Express)
+            let reason = 'N/A', reasonMy = 'N/A';
+            if (!isExpress) {
+                const reasonSelect = document.getElementById('v-reason').value;
+                const reasonOther = document.getElementById('v-reason-other').value.trim();
+                if (reasonSelect === 'Other' && !reasonOther) return alert("Please specify the reason for visit.");
+                reason = reasonSelect === 'Other' ? reasonOther : reasonSelect;
+                reasonMy = getReasonMalay(reason);
+            }
+
+            const visitId = 'VISIT-' + Math.random().toString(36).substr(2, 7).toUpperCase();
             const initialStatus = isExpress ? "Pending" : "Awaiting Approval";
 
             try {
@@ -507,6 +554,7 @@ let isProcessingScan = false;// Prevents double-scanning
                     visitId, qrActive: true, passType, visitorName: name, phone,
                     studentName: studentName || 'N/A', studentClass: studentClass || 'N/A',
                     hostName: host || 'N/A', hostEmail: hostEmail || 'N/A',
+                    reason, reasonMy,
                     visitDate, startTime, endTime, status: initialStatus,
                     hostAcknowledged: false, emailApprovalSent: false, email15MinSent: false, emailOnTimeSent: false,
                     checkInTime: null, checkOutTime: null, createdAt: serverTimestamp()
@@ -542,6 +590,9 @@ let isProcessingScan = false;// Prevents double-scanning
                     document.getElementById('v-host').value = '';
                     document.getElementById('v-host-email').value = '';
                     document.getElementById('v-phone').value = '';
+                    document.getElementById('v-reason').selectedIndex = 0;
+                    document.getElementById('v-reason-other').value = '';
+                    document.getElementById('v-reason-other').classList.add('hidden');
                     
                     // Screen redirection removed! User stays on staff-screen.
                 }, 2500);
@@ -568,7 +619,9 @@ let isProcessingScan = false;// Prevents double-scanning
             try {
                 const docRef = await addDoc(collection(db, "visits"), {
                     visitId, qrActive: true, passType: "Admin Direct Pass", visitorName: name, phone,
-                    studentName, studentClass, hostName: host, hostEmail, visitDate, startTime, endTime,
+                    studentName, studentClass, hostName: host, hostEmail,
+                    reason: 'N/A', reasonMy: 'N/A',
+                    visitDate, startTime, endTime,
                     status: "Pending", hostAcknowledged: false, emailApprovalSent: false, email15MinSent: false, emailOnTimeSent: false,
                     checkInTime: null, checkOutTime: null, createdAt: serverTimestamp()
                 });
@@ -591,7 +644,7 @@ let isProcessingScan = false;// Prevents double-scanning
                 const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${visitId}`;
 
                 let textMessage = `Hello ${name}! 👋\n\nYour school pass [${passType}] has been APPROVED.\n\n🎟️ *Pass ID:* ${visitId}\n📅 *Date:* ${visitDate}\n⏰ *Hours:* ${startTime} - ${endTime}\n\n📱 *Please show the QR code to the security during entry and exit* *View QR Code:*\n${qrLink}`;
-               window.open(`https://wa.me/${toWhatsAppNumber(phone)}?text=${encodeURIComponent(textMessage)}`, '_blank');
+               window.open(`https://wa.me/${toWhatsAppNumber(phone)}?text=${encodeURIComponent(waMsg)}`, '_blank');
                 if (hostEmail && hostEmail !== 'N/A') {
                     sendHostEmailNotification(docId, host, hostEmail, name, visitDate, startTime, endTime, "Pass Approved");
                 }
@@ -702,6 +755,7 @@ let isProcessingScan = false;// Prevents double-scanning
                                 <p class="font-bold text-gray-800">${data.visitorName}</p>
                                 <p class="text-gray-500">${data.studentName !== 'N/A' ? 'Student: ' + data.studentName + ' (' + data.studentClass + ')' : 'Host: ' + data.hostName}</p>
                                 <p class="text-purple-600 font-semibold">📅 ${data.visitDate} | ⏰ ${data.startTime} - ${data.endTime}</p>
+                                ${data.reason && data.reason !== 'N/A' ? `<p class="text-gray-600"><span class="font-semibold">Reason:</span> ${data.reason}</p>` : ''}
                             </div>
                             <div class="flex gap-2 justify-end">
                                 <button onclick="declinePass('${docSnap.id}')" class="bg-red-500 text-white font-bold px-2.5 py-1 rounded">Decline</button>
@@ -847,6 +901,8 @@ syncToGoogleSheets({
     hostName: sheetHostField,
     hostEmail: data.hostEmail || "N/A",
     phone: data.phone,
+    reason: data.reason || "N/A",
+    reasonMy: data.reasonMy || "N/A",
     visitDate: data.visitDate,
     startTime: data.startTime,
     endTime: data.endTime,
@@ -857,12 +913,15 @@ syncToGoogleSheets({
                             showResultPage(`
                                 <div class="text-green-500 text-5xl mb-1">✅</div>
                                 <h2 class="text-xl font-bold text-green-400 border-b border-gray-700 pb-2 mb-3">ENTRY PERMITTED</h2>
-                                <div class="bg-gray-900 p-4 rounded-xl text-left space-y-1.5 border border-gray-700 text-xs">
+                                <div class="bg-gray-900 p-4 rounded-xl text-left space-y-2 border border-gray-700 text-xs">
                                     <p><span class="text-gray-400">Type:</span> <span class="text-blue-400 font-bold">${data.passType}</span></p>
-                                    <p><span class="text-gray-400">Name:</span> <span class="text-white font-bold">${data.visitorName}</span></p>
-                                    ${data.studentName !== 'N/A' ? `<p><span class="text-gray-400">Student:</span> <span class="text-yellow-300 font-bold">${data.studentName} (${data.studentClass})</span></p>` : `<p><span class="text-gray-400">Host:</span> <span class="text-white font-bold">${data.hostName}</span></p>`}
-                                    <p><span class="text-gray-400">Visit Date:</span> <span class="text-white font-bold">${data.visitDate}</span></p>
-                                    <p><span class="text-gray-400">Scheduled Time:</span> <span class="text-white font-bold">${data.startTime} - ${data.endTime}</span></p>
+                                    <p class="text-base"><span class="text-gray-400">Name:</span> <span class="text-white font-bold">${data.visitorName}</span></p>
+                                    ${data.studentName !== 'N/A' ? `<p class="text-base"><span class="text-gray-400">Student:</span> <span class="text-yellow-300 font-bold">${data.studentName} (${data.studentClass})</span></p>` : `<p class="text-base"><span class="text-gray-400">Host:</span> <span class="text-white font-bold">${data.hostName}</span></p>`}
+                                    <p class="text-base"><span class="text-gray-400">Visit Date:</span> <span class="text-white font-bold">${data.visitDate}</span></p>
+                                    <p class="text-base"><span class="text-gray-400">Scheduled Time:</span> <span class="text-white font-bold">${data.startTime} - ${data.endTime}</span></p>
+                                    ${data.reason && data.reason !== 'N/A' ? `
+                                    <p><span class="text-gray-400">Reason:</span> <span class="text-white font-bold">${data.reason}</span></p>
+                                    <p><span class="text-gray-400">Sebab (BM):</span> <span class="text-white font-bold">${data.reasonMy || getReasonMalay(data.reason)}</span></p>` : ''}
                                     ${!isExpress ? `<p><span class="text-gray-400">Host Readiness:</span> <span class="${data.hostAcknowledged ? 'text-green-400 font-bold' : 'text-amber-400 font-bold'}">${data.hostAcknowledged ? '🟢 ACKNOWLEDGED (Ready)' : '🟡 PENDING HOST CONFIRMATION'}</span></p>` : ''}
                                     <p><span class="text-gray-400">Check-In Time:</span> <span class="text-green-400 font-bold">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span></p>
                                     ${isExpress ? `<p class="text-amber-400 font-bold mt-3 text-center border-t border-gray-700 pt-2">No Check-Out Required</p>` : ''}
@@ -891,12 +950,15 @@ syncToGoogleSheets({
                             showResultPage(`
                                 <div class="text-blue-500 text-5xl mb-1">✅</div>
                                 <h2 class="text-xl font-bold text-blue-400 border-b border-gray-700 pb-2 mb-3">CHECK-OUT APPROVED</h2>
-                                <div class="bg-gray-900 p-4 rounded-xl text-left space-y-1.5 border border-gray-700 text-xs">
+                                <div class="bg-gray-900 p-4 rounded-xl text-left space-y-2 border border-gray-700 text-xs">
                                     <p><span class="text-gray-400">Type:</span> <span class="text-blue-400 font-bold">${data.passType}</span></p>
-                                    <p><span class="text-gray-400">Name:</span> <span class="text-white font-bold">${data.visitorName}</span></p>
-                                    ${data.studentName !== 'N/A' ? `<p><span class="text-gray-400">Student:</span> <span class="text-yellow-300 font-bold">${data.studentName} (${data.studentClass})</span></p>` : `<p><span class="text-gray-400">Host:</span> <span class="text-white font-bold">${data.hostName}</span></p>`}
-                                    <p><span class="text-gray-400">Visit Date:</span> <span class="text-white font-bold">${data.visitDate}</span></p>
-                                    <p><span class="text-gray-400">Scheduled Time:</span> <span class="text-white font-bold">${data.startTime} - ${data.endTime}</span></p>
+                                    <p class="text-base"><span class="text-gray-400">Name:</span> <span class="text-white font-bold">${data.visitorName}</span></p>
+                                    ${data.studentName !== 'N/A' ? `<p class="text-base"><span class="text-gray-400">Student:</span> <span class="text-yellow-300 font-bold">${data.studentName} (${data.studentClass})</span></p>` : `<p class="text-base"><span class="text-gray-400">Host:</span> <span class="text-white font-bold">${data.hostName}</span></p>`}
+                                    <p class="text-base"><span class="text-gray-400">Visit Date:</span> <span class="text-white font-bold">${data.visitDate}</span></p>
+                                    <p class="text-base"><span class="text-gray-400">Scheduled Time:</span> <span class="text-white font-bold">${data.startTime} - ${data.endTime}</span></p>
+                                    ${data.reason && data.reason !== 'N/A' ? `
+                                    <p><span class="text-gray-400">Reason:</span> <span class="text-white font-bold">${data.reason}</span></p>
+                                    <p><span class="text-gray-400">Sebab (BM):</span> <span class="text-white font-bold">${data.reasonMy || getReasonMalay(data.reason)}</span></p>` : ''}
                                     <p><span class="text-gray-400">Check-Out Time:</span> <span class="text-blue-400 font-bold">${checkOutTimeString}</span></p>
                                 </div>`);
                         } else if (data.status === "Checked-Out") {
