@@ -227,6 +227,18 @@
                         <input type="email" id="adm-v-host-email" placeholder="Host Email " class="w-full p-2 border rounded">
                     </div>
                     <input type="tel" id="adm-v-phone" placeholder="Visitor WhatsApp Number" class="w-full p-2 border rounded">
+                    <select id="adm-v-reason" onchange="toggleAdminReasonOther()" class="w-full p-2 border rounded bg-white">
+                        <option value="Pick up child early">Pick up child early</option>
+                        <option value="Meeting with teacher/staff">Meeting with teacher/staff</option>
+                        <option value="Deliver items to child">Deliver items to child</option>
+                        <option value="Attend school event">Attend school event</option>
+                        <option value="Contractor / Maintenance work">Contractor / Maintenance work</option>
+                        <option value="Delivery / Supplier">Delivery / Supplier</option>
+                        <option value="Interview / Enrollment inquiry">Interview / Enrollment inquiry</option>
+                        <option value="N/A">N/A</option>
+                        <option value="Other">Other (please specify)</option>
+                    </select>
+                    <input type="text" id="adm-v-reason-other" placeholder="Please specify reason" class="w-full p-2 border rounded hidden">
                     <div class="grid grid-cols-3 gap-1">
                         <input type="date" id="adm-v-date" class="p-2 border rounded text-[10px]">
                         <input type="time" id="adm-v-start" value="08:00" class="p-2 border rounded text-[10px]">
@@ -316,6 +328,7 @@
         const auth = getAuth(app);
        let html5QrcodeScanner = null;
 let isProcessingScan = false;// Prevents double-scanning
+let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on an early-arrival pass
 
   window.forceAdminCheckOut = async function(docId, visitorName, hostName, phone, visitDate, startTime, endTime) {
     if(!confirm(`Are you sure you want to manually check out ${visitorName}?`)) return;
@@ -501,6 +514,10 @@ let isProcessingScan = false;// Prevents double-scanning
             const sel = document.getElementById('v-reason').value;
             document.getElementById('v-reason-other').classList.toggle('hidden', sel !== 'Other');
         };
+        window.toggleAdminReasonOther = function() {
+            const sel = document.getElementById('adm-v-reason').value;
+            document.getElementById('adm-v-reason-other').classList.toggle('hidden', sel !== 'Other');
+        };
 
         function toWhatsAppNumber(phone) {
     let digits = phone.replace(/[^0-9]/g, ''); // strip spaces, dashes, +
@@ -612,6 +629,12 @@ let isProcessingScan = false;// Prevents double-scanning
             const startTime = document.getElementById('adm-v-start').value;
             const endTime = document.getElementById('adm-v-end').value;
 
+            const admReasonSelect = document.getElementById('adm-v-reason').value;
+            const admReasonOther = document.getElementById('adm-v-reason-other').value.trim();
+            if (admReasonSelect === 'Other' && !admReasonOther) return alert("Please specify the reason for visit.");
+            const reason = admReasonSelect === 'Other' ? admReasonOther : admReasonSelect;
+            const reasonMy = reason === 'N/A' ? 'N/A' : getReasonMalay(reason);
+
             if (!name || !phone || !visitDate) return alert("Please fill in Visitor Name, Phone Number, and Visit Date.");
 
             const visitId = 'VISIT-' + Math.random().toString(36).substr(2, 7).toUpperCase();
@@ -620,7 +643,7 @@ let isProcessingScan = false;// Prevents double-scanning
                 const docRef = await addDoc(collection(db, "visits"), {
                     visitId, qrActive: true, passType: "Admin Direct Pass", visitorName: name, phone,
                     studentName, studentClass, hostName: host, hostEmail,
-                    reason: 'N/A', reasonMy: 'N/A',
+                    reason, reasonMy,
                     visitDate, startTime, endTime,
                     status: "Pending", hostAcknowledged: false, emailApprovalSent: false, email15MinSent: false, emailOnTimeSent: false,
                     checkInTime: null, checkOutTime: null, createdAt: serverTimestamp()
@@ -790,7 +813,7 @@ let isProcessingScan = false;// Prevents double-scanning
                             <div>
                                 <span class="font-bold text-amber-800">${d.passType}</span>
                                 <p class="font-bold text-gray-800">${d.visitorName} <span class="text-red-500">(In Campus)</span></p>
-                                <p class="text-gray-500">Scheduled End: ${d.endTime} ${d.extendedCount ? `(Extended ${d.extendedCount}x)` : ''}</p>
+                                <p class="text-gray-500">Scheduled End: ${d.visitDate} ${d.endTime} ${d.extendedCount ? `(Extended ${d.extendedCount}x)` : ''}</p>
                             </div>
                             <div class="space-y-1.5 pt-1">
                                 ${d.hostEmail && d.hostEmail !== 'N/A' ? `
@@ -822,6 +845,65 @@ window.syncToGoogleSheets = async function(visitData) {
         console.error("Google Sheets sync error:", e);
     }
 };
+
+        // Performs the actual check-in: Firestore update, Sheet sync, and the ENTRY PERMITTED screen.
+        // Used both for on-time scans and for early-arrival passes the security guard manually approves.
+        async function performCheckIn(docId, data) {
+            const isExpress = data.passType.includes("Express");
+            const isParentPass = data.passType.includes("Parent");
+            const newStatus = isExpress ? "Completed" : "Checked-In";
+
+            await updateDoc(doc(db, "visits", docId), {
+                status: newStatus,
+                checkInTime: serverTimestamp()
+            });
+
+            const sheetHostField = isParentPass
+                ? `${data.studentName} (${data.studentClass})`
+                : (data.hostName || "N/A");
+
+            syncToGoogleSheets({
+                docId,
+                passType: data.passType,
+                visitorName: data.visitorName,
+                hostName: sheetHostField,
+                hostEmail: data.hostEmail || "N/A",
+                phone: data.phone,
+                reason: data.reason || "N/A",
+                reasonMy: data.reasonMy || "N/A",
+                visitDate: data.visitDate,
+                startTime: data.startTime,
+                endTime: data.endTime,
+                checkInTime: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+                checkOutTime: isExpress ? "Not Required" : "N/A",
+                status: newStatus
+            });
+
+            showResultPage(`
+                <div class="text-green-500 text-5xl mb-1">✅</div>
+                <h2 class="text-xl font-bold text-green-400 border-b border-gray-700 pb-2 mb-3">ENTRY PERMITTED</h2>
+                <div class="bg-gray-900 p-4 rounded-xl text-left space-y-2 border border-gray-700 text-xs">
+                    <p><span class="text-gray-400">Type:</span> <span class="text-blue-400 font-bold">${data.passType}</span></p>
+                    <p class="text-base"><span class="text-gray-400">Name:</span> <span class="text-white font-bold">${data.visitorName}</span></p>
+                    ${data.studentName !== 'N/A' ? `<p class="text-base"><span class="text-gray-400">Student:</span> <span class="text-yellow-300 font-bold">${data.studentName} (${data.studentClass})</span></p>` : `<p class="text-base"><span class="text-gray-400">Host:</span> <span class="text-white font-bold">${data.hostName}</span></p>`}
+                    <p class="text-base"><span class="text-gray-400">Visit Date:</span> <span class="text-white font-bold">${data.visitDate}</span></p>
+                    <p class="text-base"><span class="text-gray-400">Scheduled Time:</span> <span class="text-white font-bold">${data.startTime} - ${data.endTime}</span></p>
+                    ${data.reason && data.reason !== 'N/A' ? `
+                    <p><span class="text-gray-400">Reason:</span> <span class="text-white font-bold">${data.reason}</span></p>
+                    <p><span class="text-gray-400">Sebab (BM):</span> <span class="text-white font-bold">${data.reasonMy || getReasonMalay(data.reason)}</span></p>` : ''}
+                    ${!isExpress ? `<p><span class="text-gray-400">Host Readiness:</span> <span class="${data.hostAcknowledged ? 'text-green-400 font-bold' : 'text-amber-400 font-bold'}">${data.hostAcknowledged ? '🟢 ACKNOWLEDGED (Ready)' : '🟡 PENDING HOST CONFIRMATION'}</span></p>` : ''}
+                    <p><span class="text-gray-400">Check-In Time:</span> <span class="text-green-400 font-bold">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span></p>
+                    ${isExpress ? `<p class="text-amber-400 font-bold mt-3 text-center border-t border-gray-700 pt-2">No Check-Out Required</p>` : ''}
+                </div>`);
+        }
+
+        // Security guard taps "Pass Approved" on the EARLY ARRIVAL screen to override and check in anyway.
+        window.confirmEarlyCheckIn = async function() {
+            if (!pendingEarlyCheckIn) return;
+            const { docId, data } = pendingEarlyCheckIn;
+            pendingEarlyCheckIn = null;
+            await performCheckIn(docId, data);
+        };
 
         function showResultPage(htmlContent) {
             window.stopScanner();
@@ -879,53 +961,39 @@ try {
                         if (data.status === "Awaiting Approval") {
                             showResultPage(`<div class="text-yellow-500 text-5xl mb-2">⏳</div><h2 class="text-xl font-bold text-yellow-400">NOT APPROVED</h2>`);
                       } else if (data.status === "Pending") {
-                            const isExpress = data.passType.includes("Express");       // controls status + checkout-required logic (unchanged)
-const isParentPass = data.passType.includes("Parent");     // NEW - only controls what goes in the "host" field
-const newStatus = isExpress ? "Completed" : "Checked-In";
+                            // EARLY ARRIVAL CHECK — if the visitor scans in well before their scheduled
+                            // start time, let security choose to approve anyway or reject and rescan later.
+                            const EARLY_ARRIVAL_MINUTES = 15;
+                            const nowVal = new Date();
+                            const currentTimeVal = nowVal.getHours() * 60 + nowVal.getMinutes();
+                            const [startH, startM] = (data.startTime || "00:00").split(":").map(Number);
+                            const startTimeVal = startH * 60 + startM;
+                            const minutesEarly = startTimeVal - currentTimeVal;
 
-await updateDoc(doc(db, "visits", d.id), { 
-    status: newStatus, 
-    checkInTime: serverTimestamp() 
-});
+                            if (minutesEarly > EARLY_ARRIVAL_MINUTES) {
+                                pendingEarlyCheckIn = { docId: d.id, data };
+                                showResultPage(`
+                                    <div class="text-amber-500 text-5xl mb-1">⏳</div>
+                                    <h2 class="text-xl font-bold text-amber-400 border-b border-gray-700 pb-2 mb-3">EARLY ARRIVAL</h2>
+                                    <div class="bg-gray-900 p-4 rounded-xl text-left space-y-2 border border-gray-700 text-xs">
+                                        <p><span class="text-gray-400">Type:</span> <span class="text-blue-400 font-bold">${data.passType}</span></p>
+                                        <p class="text-base"><span class="text-gray-400">Name:</span> <span class="text-white font-bold">${data.visitorName}</span></p>
+                                        ${data.studentName !== 'N/A' ? `<p class="text-base"><span class="text-gray-400">Student:</span> <span class="text-yellow-300 font-bold">${data.studentName} (${data.studentClass})</span></p>` : `<p class="text-base"><span class="text-gray-400">Host:</span> <span class="text-white font-bold">${data.hostName}</span></p>`}
+                                        <p class="text-base"><span class="text-gray-400">Visit Date:</span> <span class="text-white font-bold">${data.visitDate}</span></p>
+                                        <p class="text-base"><span class="text-gray-400">Scheduled Time:</span> <span class="text-white font-bold">${data.startTime} - ${data.endTime}</span></p>
+                                        ${data.reason && data.reason !== 'N/A' ? `
+                                        <p><span class="text-gray-400">Reason:</span> <span class="text-white font-bold">${data.reason}</span></p>
+                                        <p><span class="text-gray-400">Sebab (BM):</span> <span class="text-white font-bold">${data.reasonMy || getReasonMalay(data.reason)}</span></p>` : ''}
+                                        <p class="text-amber-300 font-semibold pt-1 border-t border-gray-700">⚠️ Visitor is ${minutesEarly} minute(s) early.</p>
+                                    </div>
+                                    <div class="space-y-2 pt-3">
+                                        <button onclick="confirmEarlyCheckIn()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl shadow">✅ Pass Approved - Check In Now</button>
+                                        <button onclick="backToScanner()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl shadow">❌ Reject - Scan Again Later</button>
+                                    </div>`);
+                                return;
+                            }
 
-// For any Parent pass (Express or Standard), show the student being picked up
-// instead of a host, since neither parent-pass form collects a host name
-const sheetHostField = isParentPass 
-    ? `${data.studentName} (${data.studentClass})` 
-    : (data.hostName || "N/A");
-
-syncToGoogleSheets({
-    docId: d.id, 
-    passType: data.passType,
-    visitorName: data.visitorName,
-    hostName: sheetHostField,
-    hostEmail: data.hostEmail || "N/A",
-    phone: data.phone,
-    reason: data.reason || "N/A",
-    reasonMy: data.reasonMy || "N/A",
-    visitDate: data.visitDate,
-    startTime: data.startTime,
-    endTime: data.endTime,
-    checkInTime: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-    checkOutTime: isExpress ? "Not Required" : "N/A",   // still keyed off isExpress, not isParentPass
-    status: newStatus
-});
-                            showResultPage(`
-                                <div class="text-green-500 text-5xl mb-1">✅</div>
-                                <h2 class="text-xl font-bold text-green-400 border-b border-gray-700 pb-2 mb-3">ENTRY PERMITTED</h2>
-                                <div class="bg-gray-900 p-4 rounded-xl text-left space-y-2 border border-gray-700 text-xs">
-                                    <p><span class="text-gray-400">Type:</span> <span class="text-blue-400 font-bold">${data.passType}</span></p>
-                                    <p class="text-base"><span class="text-gray-400">Name:</span> <span class="text-white font-bold">${data.visitorName}</span></p>
-                                    ${data.studentName !== 'N/A' ? `<p class="text-base"><span class="text-gray-400">Student:</span> <span class="text-yellow-300 font-bold">${data.studentName} (${data.studentClass})</span></p>` : `<p class="text-base"><span class="text-gray-400">Host:</span> <span class="text-white font-bold">${data.hostName}</span></p>`}
-                                    <p class="text-base"><span class="text-gray-400">Visit Date:</span> <span class="text-white font-bold">${data.visitDate}</span></p>
-                                    <p class="text-base"><span class="text-gray-400">Scheduled Time:</span> <span class="text-white font-bold">${data.startTime} - ${data.endTime}</span></p>
-                                    ${data.reason && data.reason !== 'N/A' ? `
-                                    <p><span class="text-gray-400">Reason:</span> <span class="text-white font-bold">${data.reason}</span></p>
-                                    <p><span class="text-gray-400">Sebab (BM):</span> <span class="text-white font-bold">${data.reasonMy || getReasonMalay(data.reason)}</span></p>` : ''}
-                                    ${!isExpress ? `<p><span class="text-gray-400">Host Readiness:</span> <span class="${data.hostAcknowledged ? 'text-green-400 font-bold' : 'text-amber-400 font-bold'}">${data.hostAcknowledged ? '🟢 ACKNOWLEDGED (Ready)' : '🟡 PENDING HOST CONFIRMATION'}</span></p>` : ''}
-                                    <p><span class="text-gray-400">Check-In Time:</span> <span class="text-green-400 font-bold">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span></p>
-                                    ${isExpress ? `<p class="text-amber-400 font-bold mt-3 text-center border-t border-gray-700 pt-2">No Check-Out Required</p>` : ''}
-                                </div>`);
+                            await performCheckIn(d.id, data);
                             } else if (data.status === "Completed") {
                             showResultPage(`
                                 <div class="text-yellow-500 text-5xl mb-2">⚠️</div>
