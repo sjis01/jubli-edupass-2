@@ -681,7 +681,7 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
 
         // EMAIL AUTOMATION FUNCTIONS VIA EMAILJS
 // EMAIL AUTOMATION FUNCTION (2-Template Router)
-       async function sendHostEmailNotification(docId, host, hostEmail, visitorName, visitDate, startTime, endTime, notificationType, customLink = "") {
+      window.sendHostEmailNotification = async function(docId, host, hostEmail, visitorName, visitDate, startTime, endTime, notificationType, customLink = "") {
             const activeTemplateId = notificationType.includes("Overdue") 
                 ? EMAILJS_OVERDUE_TEMPLATE_ID 
                 : EMAILJS_TEMPLATE_ID;
@@ -708,7 +708,7 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
             } catch (err) {
                 console.error("Email dispatch error:", err);
             }
-        }
+        };
       // BACKGROUND TIMER TO CHECK 15-MIN, ON-TIME, AND OVERDUE NOTIFICATIONS
        async function checkScheduledHostEmails() {
             try {
