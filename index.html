@@ -897,6 +897,60 @@ window.syncToGoogleSheets = async function(visitData) {
                 </div>`);
         }
 
+        // ---- SCAN TIME WINDOW (±30 minutes around scheduled start time) ----
+        const SCAN_WINDOW_BEFORE_MIN = 30;
+        const SCAN_WINDOW_AFTER_MIN = 30;
+
+        function getScanWindowStatus(visitDate, startTime) {
+            const [y, m, d] = (visitDate || "").split("-").map(Number);
+            const [hh, mm] = (startTime || "00:00").split(":").map(Number);
+            const scheduled = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0, 0);
+            const opens = new Date(scheduled.getTime() - SCAN_WINDOW_BEFORE_MIN * 60000);
+            const closes = new Date(scheduled.getTime() + SCAN_WINDOW_AFTER_MIN * 60000);
+            const now = new Date();
+            let state = "ok";
+            if (now < opens) state = "early";
+            else if (now > closes) state = "late";
+            return { state, scheduled, opens, closes };
+        }
+
+        function formatMalayDate(dateObj) {
+            const days = ["Ahad", "Isnin", "Selasa", "Rabu", "Khamis", "Jumaat", "Sabtu"];
+            const months = ["Januari", "Februari", "Mac", "April", "Mei", "Jun", "Julai", "Ogos", "September", "Oktober", "November", "Disember"];
+            return `${days[dateObj.getDay()]}, ${dateObj.getDate()} ${months[dateObj.getMonth()]} ${dateObj.getFullYear()}`;
+        }
+
+        function formatTimeHM(dateObj) {
+            return `${String(dateObj.getHours()).padStart(2, "0")}:${String(dateObj.getMinutes()).padStart(2, "0")}`;
+        }
+
+        // Polite Malay rejection screen. Does NOT modify the pass in the database.
+        function showTimeWindowRejection(win, data) {
+            const isEarly = win.state === "early";
+            const title = isEarly ? "DITOLAK - TERLALU AWAL" : "DITOLAK - TERLAMBAT";
+            const icon = isEarly ? "⏳" : "⌛";
+            const message = isEarly
+                ? `Harap maaf, pas ini belum boleh digunakan. Pas hanya boleh diimbas bermula <b>${SCAN_WINDOW_BEFORE_MIN} minit sebelum</b> waktu lawatan. Sila datang semula pada masa yang ditetapkan. Terima kasih atas kefahaman anda.`
+                : `Harap maaf, tempoh pengimbasan pas ini telah tamat (<b>${SCAN_WINDOW_AFTER_MIN} minit selepas</b> waktu lawatan). Sila hubungi pihak pentadbir untuk bantuan. Terima kasih atas kefahaman anda.`;
+            const windowLine = isEarly
+                ? `<p><span class="text-gray-400">Boleh diimbas mulai:</span> <span class="text-amber-300 font-bold">${formatTimeHM(win.opens)}${win.opens.toDateString() !== win.scheduled.toDateString() ? " (" + formatMalayDate(win.opens) + ")" : ""}</span></p>`
+                : `<p><span class="text-gray-400">Tempoh imbasan tamat:</span> <span class="text-amber-300 font-bold">${formatTimeHM(win.closes)}</span></p>`;
+
+            showResultPage(`
+                <div class="text-amber-500 text-5xl mb-1">${icon}</div>
+                <h2 class="text-xl font-bold text-red-400 border-b border-gray-700 pb-2 mb-3">${title}</h2>
+                <div class="bg-gray-900 p-4 rounded-xl text-left space-y-2 border border-gray-700 text-xs">
+                    <p class="text-sm text-gray-200 leading-relaxed">${message}</p>
+                    <div class="border-t border-gray-700 pt-2 space-y-2">
+                        <p class="text-base"><span class="text-gray-400">Nama:</span> <span class="text-white font-bold">${data.visitorName}</span></p>
+                        <p class="text-base"><span class="text-gray-400">Tarikh Lawatan:</span> <span class="text-white font-bold">${formatMalayDate(win.scheduled)}</span></p>
+                        <p class="text-base"><span class="text-gray-400">Masa Lawatan:</span> <span class="text-white font-bold">${data.startTime} - ${data.endTime}</span></p>
+                        ${windowLine}
+                    </div>
+                    <p class="text-green-400 font-semibold pt-1 border-t border-gray-700">ℹ️ Kod QR tidak terjejas dan masih sah untuk diimbas semula dalam tempoh yang dibenarkan.</p>
+                </div>`);
+        }
+
         // Security guard taps "Pass Approved" on the EARLY ARRIVAL screen to override and check in anyway.
         window.confirmEarlyCheckIn = async function() {
             if (!pendingEarlyCheckIn) return;
@@ -961,35 +1015,12 @@ try {
                         if (data.status === "Awaiting Approval") {
                             showResultPage(`<div class="text-yellow-500 text-5xl mb-2">⏳</div><h2 class="text-xl font-bold text-yellow-400">NOT APPROVED</h2>`);
                       } else if (data.status === "Pending") {
-                            // EARLY ARRIVAL CHECK — if the visitor scans in well before their scheduled
-                            // start time, let security choose to approve anyway or reject and rescan later.
-                            const EARLY_ARRIVAL_MINUTES = 15;
-                            const nowVal = new Date();
-                            const currentTimeVal = nowVal.getHours() * 60 + nowVal.getMinutes();
-                            const [startH, startM] = (data.startTime || "00:00").split(":").map(Number);
-                            const startTimeVal = startH * 60 + startM;
-                            const minutesEarly = startTimeVal - currentTimeVal;
-
-                            if (minutesEarly > EARLY_ARRIVAL_MINUTES) {
-                                pendingEarlyCheckIn = { docId: d.id, data };
-                                showResultPage(`
-                                    <div class="text-amber-500 text-5xl mb-1">⏳</div>
-                                    <h2 class="text-xl font-bold text-amber-400 border-b border-gray-700 pb-2 mb-3">EARLY ARRIVAL</h2>
-                                    <div class="bg-gray-900 p-4 rounded-xl text-left space-y-2 border border-gray-700 text-xs">
-                                        <p><span class="text-gray-400">Type:</span> <span class="text-blue-400 font-bold">${data.passType}</span></p>
-                                        <p class="text-base"><span class="text-gray-400">Name:</span> <span class="text-white font-bold">${data.visitorName}</span></p>
-                                        ${data.studentName !== 'N/A' ? `<p class="text-base"><span class="text-gray-400">Student:</span> <span class="text-yellow-300 font-bold">${data.studentName} (${data.studentClass})</span></p>` : `<p class="text-base"><span class="text-gray-400">Host:</span> <span class="text-white font-bold">${data.hostName}</span></p>`}
-                                        <p class="text-base"><span class="text-gray-400">Visit Date:</span> <span class="text-white font-bold">${data.visitDate}</span></p>
-                                        <p class="text-base"><span class="text-gray-400">Scheduled Time:</span> <span class="text-white font-bold">${data.startTime} - ${data.endTime}</span></p>
-                                        ${data.reason && data.reason !== 'N/A' ? `
-                                        <p><span class="text-gray-400">Reason:</span> <span class="text-white font-bold">${data.reason}</span></p>
-                                        <p><span class="text-gray-400">Sebab (BM):</span> <span class="text-white font-bold">${data.reasonMy || getReasonMalay(data.reason)}</span></p>` : ''}
-                                        <p class="text-amber-300 font-semibold pt-1 border-t border-gray-700">⚠️ Visitor is ${minutesEarly} minute(s) early.</p>
-                                    </div>
-                                    <div class="space-y-2 pt-3">
-                                        <button onclick="confirmEarlyCheckIn()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 rounded-xl shadow">✅ Pass Approved - Check In Now</button>
-                                        <button onclick="backToScanner()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl shadow">❌ Reject - Scan Again Later</button>
-                                    </div>`);
+                            // SCAN TIME WINDOW CHECK — QR is only valid from 30 min before to 30 min after
+                            // the scheduled start time. Rejected scans write NOTHING to Firestore, so the
+                            // pass stays "Pending" and can be scanned again inside the valid window.
+                            const win = getScanWindowStatus(data.visitDate, data.startTime);
+                            if (win.state !== "ok") {
+                                showTimeWindowRejection(win, data);
                                 return;
                             }
 
