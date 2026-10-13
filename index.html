@@ -419,6 +419,7 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
             }
 
             // Start background timer check for 15-min and exact-time notifications
+            checkScheduledHostEmails();
             setInterval(checkScheduledHostEmails, 60000); 
         });
 
@@ -705,18 +706,19 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
                 if (notificationType === "Pass Approved" || notificationType === "Pass Approved & Created") {
                     await updateDoc(doc(db, "visits", docId), { emailApprovalSent: true });
                 }
+                return true;
             } catch (err) {
                 console.error("Email dispatch error:", err);
+                return false; // lets the caller know it failed so it can retry later
             }
         };
-      // BACKGROUND TIMER TO CHECK 15-MIN, ON-TIME, AND OVERDUE NOTIFICATIONS
+      // BACKGROUND TIMER TO CHECK ON-TIME NOTIFICATIONS (15-minute reminder removed)
        async function checkScheduledHostEmails() {
             try {
                 const now = new Date();
-                const todayStr = now.toISOString().split('T')[0];
-                const currentHours = now.getHours();
-                const currentMinutes = now.getMinutes();
-                const currentTimeVal = currentHours * 60 + currentMinutes;
+                // Local date (not UTC) so passes are matched correctly in Malaysia (UTC+8)
+                const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                const currentTimeVal = now.getHours() * 60 + now.getMinutes();
 
                 // 1. CHECK FOR UPCOMING NOTIFICATIONS (Pending Status)
                 const qPending = query(collection(db, "visits"), where("status", "==", "Pending"), where("visitDate", "==", todayStr));
@@ -726,19 +728,15 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
                     const d = docSnap.data();
                     if (!d.hostEmail || d.hostEmail === 'N/A') return;
 
-                    const [startH, startM] = d.startTime.split(':').map(Number);
+                    const [startH, startM] = (d.startTime || "00:00").split(':').map(Number);
                     const startTimeVal = startH * 60 + startM;
-                    
-                  const ackUrl = `${window.location.origin}${window.location.pathname}?action=ack&id=${docSnap.id}`;
 
-                    if (!d.email15MinSent && (startTimeVal - currentTimeVal === 15)) {
-                        await sendHostEmailNotification(docSnap.id, d.hostName, d.hostEmail, d.visitorName, d.visitDate, d.startTime, d.endTime, "Upcoming Visit in 15 Minutes - Please Confirm Readiness", ackUrl);
-                        await updateDoc(doc(db, "visits", docSnap.id), { email15MinSent: true });
-                    }
+                    const ackUrl = `${window.location.origin}${window.location.pathname}?action=ack&id=${docSnap.id}`;
 
-                    if (!d.emailOnTimeSent && (currentTimeVal >= startTimeVal && currentTimeVal <= startTimeVal + 5)) {
-                        await sendHostEmailNotification(docSnap.id, d.hostName, d.hostEmail, d.visitorName, d.visitDate, d.startTime, d.endTime, "Visit Starting Now - Please Confirm Readiness", ackUrl);
-                        await updateDoc(doc(db, "visits", docSnap.id), { emailOnTimeSent: true });
+                    // On-time notice: from start time until 5 minutes after
+                    if (!d.emailOnTimeSent && currentTimeVal >= startTimeVal && currentTimeVal <= startTimeVal + 5) {
+                        const ok = await sendHostEmailNotification(docSnap.id, d.hostName, d.hostEmail, d.visitorName, d.visitDate, d.startTime, d.endTime, "Visit Starting Now - Please Confirm Readiness", ackUrl);
+                        if (ok) await updateDoc(doc(db, "visits", docSnap.id), { emailOnTimeSent: true });
                     }
                 });
             } catch (e) {
