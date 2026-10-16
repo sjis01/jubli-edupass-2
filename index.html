@@ -418,9 +418,8 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
                 }
             }
 
-            // Start background timer check for 15-min and exact-time notifications
-            checkScheduledHostEmails();
-            setInterval(checkScheduledHostEmails, 60000); 
+            // Readiness emails are now sent by the Google Apps Script (processReadinessEmails),
+            // so the page no longer runs its own timer.
         });
 
         window.closeActionModal = function() {
@@ -657,6 +656,7 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
                     sendHostEmailNotification(docRef.id, host, hostEmail, name, visitDate, startTime, endTime, "Pass Approved & Created");
                 }
 
+                syncPendingPass(docRef.id, "Admin Direct Pass", name, phone, host, hostEmail, visitDate, startTime, endTime);
                 alert("Pass Created & Sent!");
             } catch(e) { alert("Admin pass creation failed: " + e.message); }
         };
@@ -665,6 +665,7 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
         window.approveAndSend = async function(docId, visitId, passType, name, phone, studentName, studentClass, host, hostEmail, visitDate, startTime, endTime) {
             try {
                 await updateDoc(doc(db, "visits", docId), { status: "Pending" });
+                syncPendingPass(docId, passType, name, phone, host, hostEmail, visitDate, startTime, endTime);
                 const qrLink = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${visitId}`;
 
                 let textMessage = `Hello ${name}! 👋\n\nYour school pass [${passType}] has been APPROVED.\n\n🎟️ *Pass ID:* ${visitId}\n📅 *Date:* ${visitDate}\n⏰ *Hours:* ${startTime} - ${endTime}\n\n📱 *Please show the QR code to the security during entry and exit* *View QR Code:*\n${qrLink}`;
@@ -708,7 +709,7 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
                 }
                 return true;
             } catch (err) {
-                console.error("Email dispatch error:", err);
+                console.error("Email dispatch error:", err && (err.text || err.message) ? (err.status || "") + " " + (err.text || err.message) : err);
                 return false; // lets the caller know it failed so it can retry later
             }
         };
@@ -724,20 +725,28 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
                 const qPending = query(collection(db, "visits"), where("status", "==", "Pending"), where("visitDate", "==", todayStr));
                 const pendingSnaps = await getDocs(qPending);
 
+                console.log(`[Readiness email] ${now.toLocaleTimeString()} - ${pendingSnaps.size} Pending pass(es) for ${todayStr}`);
+
                 pendingSnaps.forEach(async (docSnap) => {
                     const d = docSnap.data();
-                    if (!d.hostEmail || d.hostEmail === 'N/A') return;
+                    const label = `[Readiness email] ${d.visitorName} (${d.startTime})`;
+                    if (!d.hostEmail || d.hostEmail === 'N/A') { console.log(label, "skipped: no host email on this pass"); return; }
+                    if (d.emailOnTimeSent) { console.log(label, "skipped: already sent"); return; }
 
                     const [startH, startM] = (d.startTime || "00:00").split(':').map(Number);
+                    const [endH, endM] = (d.endTime || "23:59").split(':').map(Number);
                     const startTimeVal = startH * 60 + startM;
+                    const endTimeVal = endH * 60 + endM;
+
+                    // Send from the start time until the visit's end time, as long as the visitor is still Pending
+                    // (so a late page load or a failed attempt still gets the email).
+                    if (currentTimeVal < startTimeVal) { console.log(label, "waiting: start time not reached"); return; }
+                    if (currentTimeVal > endTimeVal) { console.log(label, "skipped: visit time already over"); return; }
 
                     const ackUrl = `${window.location.origin}${window.location.pathname}?action=ack&id=${docSnap.id}`;
-
-                    // On-time notice: from start time until 5 minutes after
-                    if (!d.emailOnTimeSent && currentTimeVal >= startTimeVal && currentTimeVal <= startTimeVal + 5) {
-                        const ok = await sendHostEmailNotification(docSnap.id, d.hostName, d.hostEmail, d.visitorName, d.visitDate, d.startTime, d.endTime, "Visit Starting Now - Please Confirm Readiness", ackUrl);
-                        if (ok) await updateDoc(doc(db, "visits", docSnap.id), { emailOnTimeSent: true });
-                    }
+                    const ok = await sendHostEmailNotification(docSnap.id, d.hostName, d.hostEmail, d.visitorName, d.visitDate, d.startTime, d.endTime, "Visit Starting Now - Please Confirm Readiness", ackUrl);
+                    console.log(label, ok ? "email sent" : "email FAILED (see error above)");
+                    if (ok) await updateDoc(doc(db, "visits", docSnap.id), { emailOnTimeSent: true });
                 });
             } catch (e) {
                 console.error("Error checking scheduled emails:", e);
@@ -842,6 +851,14 @@ window.syncToGoogleSheets = async function(visitData) {
     } catch (e) {
         console.error("Google Sheets sync error:", e);
     }
+};
+
+// Adds a "Pending" row to the Sheet when a pass with a host email is approved/created,
+// so the Google Apps Script can send the readiness email even when this page is closed.
+window.syncPendingPass = function(docId, passType, name, phone, host, hostEmail, visitDate, startTime, endTime) {
+    if (!hostEmail || hostEmail === 'N/A') return;
+    syncToGoogleSheets({ docId, passType, visitorName: name, hostName: host || "N/A", hostEmail,
+        phone, visitDate, startTime, endTime, status: "Pending" });
 };
 
         // Performs the actual check-in: Firestore update, Sheet sync, and the ENTRY PERMITTED screen.
