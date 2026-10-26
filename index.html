@@ -389,8 +389,14 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
     const snap = await getDoc(doc(db, "visits", docId));
     if (snap.exists()) {
         const data = snap.data();
+        if (!window.canExtendNow(data.endTime)) {
+            icon.innerText = "⛔";
+            title.innerText = "Extension Not Allowed";
+            msg.innerText = "Extensions are not allowed after 5:00 PM. Please make sure the visitor leaves the campus, or contact Security / Administration for help.";
+            return;
+        }
         let currentEndHour = parseInt((data.endTime || "17:00").split(":")[0]);
-        let newEndHour = (currentEndHour + 1) % 24;
+        let newEndHour = currentEndHour + 1;
         let formattedEnd = (newEndHour < 10 ? '0' : '') + newEndHour + ":00";
 
         await updateDoc(doc(db, "visits", docId), { 
@@ -824,7 +830,7 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
                             </div>
                             <div class="space-y-1.5 pt-1">
                                 ${d.hostEmail && d.hostEmail !== 'N/A' ? `
-                                <button onclick="sendHostEmailNotification('${docId}', '${d.hostName}', '${d.hostEmail}', '${d.visitorName}', '${d.visitDate}', '${d.startTime}', '${d.endTime}', '🚨 Overdue Visitor - Action Required', '${extendUrl}')" class="w-full text-center bg-amber-600 text-white font-bold py-2 rounded hover:bg-amber-700 shadow">
+                                <button onclick="if(!canExtendNow('${d.endTime}')){alert('Extensions are not available after 5:00 PM, so no extension link was sent.');return;} sendHostEmailNotification('${docId}', '${d.hostName}', '${d.hostEmail}', '${d.visitorName}', '${d.visitDate}', '${d.startTime}', '${d.endTime}', '🚨 Overdue Visitor - Action Required', '${extendUrl}')" class="w-full text-center bg-amber-600 text-white font-bold py-2 rounded hover:bg-amber-700 shadow">
                                     ✉️ Send 1-Hour Extension Email via System
                                 </button>` : ''}
                                 <button onclick="forceAdminCheckOut('${docId}', '${d.visitorName}', '${d.hostName}', '${d.phone}', '${d.visitDate}', '${d.startTime}', '${d.endTime}')" class="w-full text-center bg-gray-700 text-white font-bold py-2 rounded hover:bg-gray-800 shadow">
@@ -851,6 +857,15 @@ window.syncToGoogleSheets = async function(visitData) {
     } catch (e) {
         console.error("Google Sheets sync error:", e);
     }
+};
+
+// Extensions are not allowed once it is 5:00 PM, or if the new end time would go past 5:00 PM.
+const EXTEND_CUTOFF_HOUR = 17;
+window.canExtendNow = function(currentEndTime) {
+    const now = new Date();
+    if (now.getHours() >= EXTEND_CUTOFF_HOUR) return false;
+    const endHour = parseInt((currentEndTime || "17:00").split(":")[0], 10);
+    return (endHour + 1) <= EXTEND_CUTOFF_HOUR;
 };
 
 // Adds a "Pending" row to the Sheet when a pass with a host email is approved/created,
