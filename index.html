@@ -114,10 +114,13 @@
                             <label class="text-xs font-bold text-gray-500">HOST NAME / TEACHER</label>
                             <input type="text" id="v-host" placeholder="e.g. Mr. Smith" class="w-full p-2.5 border rounded-lg outline-none">
                         </div>
-                        <div>
-                            <label class="text-xs font-bold text-gray-500">HOST EMAIL (FOR NOTIFICATIONS)</label>
-                            <input type="email" id="v-host-email" placeholder="host@school.edu" class="w-full p-2.5 border rounded-lg outline-none">
-                        </div>
+                    </div>
+
+                    <!-- HOST EMAIL (all pass types) - defaults to the logged-in email, can be changed -->
+                    <div id="host-email-field">
+                        <label class="text-xs font-bold text-gray-500">HOST EMAIL (FOR NOTIFICATIONS)</label>
+                        <input type="email" id="v-host-email" placeholder="host@school.edu" class="w-full p-2.5 border rounded-lg outline-none">
+                        <p class="text-xs text-gray-400 mt-1">Filled in with your login email. Change it if you are registering this pass for someone else.</p>
                     </div>
 
                     <!-- COMMON PHONE & DATE FIELDS -->
@@ -486,7 +489,10 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
 
         function routeUserToScreen(role) {
             document.getElementById('login-screen').classList.add('hidden');
-            if(role === 'staff') document.getElementById('staff-screen').classList.replace('hidden', 'flex');
+            if(role === 'staff') {
+                document.getElementById('staff-screen').classList.replace('hidden', 'flex');
+                document.getElementById('v-host-email').value = (auth.currentUser && auth.currentUser.email) || '';
+            }
             if(role === 'admin') {
                 document.getElementById('admin-screen').classList.replace('hidden', 'flex');
                 listenForApprovals(); 
@@ -553,8 +559,15 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
             } else {
                 name = document.getElementById('v-name').value.trim();
                 host = document.getElementById('v-host').value.trim();
-                hostEmail = document.getElementById('v-host-email').value.trim();
                 if (!name || !host || !phone || !visitDate) return alert("Fill in Visitor Name, Host, Phone, and Date.");
+            }
+
+            // Host email applies to every pass type (defaults to the login email, can be changed)
+            hostEmail = document.getElementById('v-host-email').value.trim();
+            if (hostEmail && !/^\S+@\S+\.\S+$/.test(hostEmail)) return alert("Please enter a valid Host Email.");
+            if (passType.includes('Parent') && hostEmail) {
+                // Parent passes have no host name field: use a name taken from the email (john.tan@x.com -> John Tan)
+                host = hostEmail.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
             }
 
             const isExpress = passType.includes('Express');
@@ -611,7 +624,7 @@ let pendingEarlyCheckIn = null; // Holds {docId, data} while security decides on
                     document.getElementById('v-name').value = '';
                     document.getElementById('p-student-name').value = '';
                     document.getElementById('v-host').value = '';
-                    document.getElementById('v-host-email').value = '';
+                    document.getElementById('v-host-email').value = (auth.currentUser && auth.currentUser.email) || '';
                     document.getElementById('v-phone').value = '';
                     document.getElementById('v-reason').selectedIndex = 0;
                     document.getElementById('v-reason-other').value = '';
